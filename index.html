@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="bn">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Incubator Average Data Dashboard</title>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1050px;
+            margin: auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #f59e0b;
+            font-size: 24px;
+        }
+
+        /* Status Cards */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 18px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+            text-align: center;
+        }
+
+        .card h3 {
+            font-size: 13px;
+            color: #94a3b8;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card p {
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .temp-val {
+            color: #f43f5e;
+        }
+
+        .hum-val {
+            color: #38bdf8;
+        }
+
+        .avg-temp-val {
+            color: #f59e0b;
+        }
+
+        .avg-hum-val {
+            color: #10b981;
+        }
+
+        .heater-on {
+            color: #22c55e;
+        }
+
+        .heater-off {
+            color: #64748b;
+        }
+
+        /* Chart Container */
+        .chart-box {
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+            position: relative;
+            height: 380px;
+        }
+
+        .status-tag {
+            text-align: right;
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 10px;
+        }
+
+        .live-dot {
+            height: 8px;
+            width: 8px;
+            background-color: #22c55e;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>🐣 Incubator Average Trend Dashboard</h1>
+
+        <!-- Quick Cards -->
+        <div class="cards-grid">
+            <div class="card">
+                <h3>Current Temp</h3>
+                <p id="currTemp" class="temp-val">-- °C</p>
+            </div>
+            <div class="card">
+                <h3>Current Hum</h3>
+                <p id="currHum" class="hum-val">-- %</p>
+            </div>
+            <div class="card">
+                <h3>Avg Temp</h3>
+                <p id="avgTemp" class="avg-temp-val">-- °C</p>
+            </div>
+            <div class="card">
+                <h3>Avg Hum</h3>
+                <p id="avgHum" class="avg-hum-val">-- %</p>
+            </div>
+            <div class="card">
+                <h3>Heater State</h3>
+                <p id="currHeater" class="heater-off">--</p>
+            </div>
+        </div>
+
+        <!-- Live Chart (Avg Temp & Avg Hum) -->
+        <div class="chart-box">
+            <canvas id="incubatorChart"></canvas>
+            <div class="status-tag" id="lastUpdated"><span class="live-dot"></span>Connecting...</div>
+        </div>
+    </div>
+
+    <script>
+        const FIREBASE_URL = "https://enkuvator-default-rtdb.firebaseio.com/History.json";
+
+        // Chart.js Setup for Avg Temp & Avg Hum
+        const ctx = document.getElementById('incubatorChart').getContext('2d');
+        const incubatorChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Avg Temp (°C)',
+                        data: [],
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Avg Humidity (%)',
+                        data: [],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                    y: {
+                        type: 'linear', display: true, position: 'left',
+                        ticks: { color: '#f59e0b' }, grid: { color: '#334155' },
+                        title: { display: true, text: 'Avg Temp (°C)', color: '#f59e0b' }
+                    },
+                    y1: {
+                        type: 'linear', display: true, position: 'right',
+                        ticks: { color: '#10b981' }, grid: { drawOnChartArea: false },
+                        title: { display: true, text: 'Avg Hum (%)', color: '#10b981' }
+                    }
+                },
+                plugins: {
+                    legend: { labels: { color: '#f8fafc' } }
+                }
+            }
+        });
+
+        // Fetch Data from Firebase
+        async function loadDashboardData() {
+            try {
+                const res = await fetch(FIREBASE_URL);
+                const data = await res.json();
+
+                if (!data) return;
+
+                const labels = [];
+                const avgTemps = [];
+                const avgHums = [];
+                let latestEntry = null;
+
+                // Extract last 25 logs
+                const keys = Object.keys(data).slice(-25);
+
+                keys.forEach(key => {
+                    const item = data[key];
+                    if (item) {
+                        // Extract avg_temp and avg_hum, with fallback to temp and hum if unavailable
+                        const avgT = item.avg_temp !== undefined ? item.avg_temp : item.temp;
+                        const avgH = item.avg_hum !== undefined ? item.avg_hum : item.hum;
+
+                        if (avgT !== undefined && avgH !== undefined) {
+                            let ts = item.timestamp || (!isNaN(key) && key > 1600000000 ? parseInt(key) : null);
+                            let timeLabel = "Boot/Log";
+
+                            if (ts) {
+                                const date = new Date(ts * 1000);
+                                timeLabel = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            }
+
+                            labels.push(timeLabel);
+                            avgTemps.push(Number(avgT).toFixed(1));
+                            avgHums.push(Number(avgH).toFixed(1));
+                            latestEntry = item;
+                        }
+                    }
+                });
+
+                // Update Chart datasets with Average values
+                incubatorChart.data.labels = labels;
+                incubatorChart.data.datasets[0].data = avgTemps;
+                incubatorChart.data.datasets[1].data = avgHums;
+                incubatorChart.update();
+
+                // Update Top Cards
+                if (latestEntry) {
+                    document.getElementById('currTemp').innerText = `${Number(latestEntry.temp || 0).toFixed(1)} °C`;
+                    document.getElementById('currHum').innerText = `${Number(latestEntry.hum || 0).toFixed(1)} %`;
+
+                    const currentAvgTemp = latestEntry.avg_temp !== undefined ? latestEntry.avg_temp : latestEntry.temp;
+                    const currentAvgHum = latestEntry.avg_hum !== undefined ? latestEntry.avg_hum : latestEntry.hum;
+
+                    document.getElementById('avgTemp').innerText = `${Number(currentAvgTemp || 0).toFixed(1)} °C`;
+                    document.getElementById('avgHum').innerText = `${Number(currentAvgHum || 0).toFixed(1)} %`;
+
+                    const heaterElem = document.getElementById('currHeater');
+                    if (latestEntry.heater === true) {
+                        heaterElem.innerText = "ON";
+                        heaterElem.className = "heater-on";
+                    } else {
+                        heaterElem.innerText = "OFF";
+                        heaterElem.className = "heater-off";
+                    }
+                }
+
+                document.getElementById('lastUpdated').innerHTML = `<span class="live-dot"></span>Last Sync: ${new Date().toLocaleTimeString()}`;
+
+            } catch (err) {
+                console.error("Firebase fetch error:", err);
+                document.getElementById('lastUpdated').innerText = "Sync Error!";
+            }
+        }
+
+        loadDashboardData();
+        setInterval(loadDashboardData, 15000);
+    </script>
+
+</body>
+
+</html>
